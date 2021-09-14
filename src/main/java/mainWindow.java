@@ -20,6 +20,8 @@ import scala.collection.JavaConverters;
 import scala.collection.Seq;
 import scala.concurrent.JavaConversions;
 
+import static java.lang.Math.pow;
+
 public class mainWindow implements ActionListener, SerialPortPacketListener
 {
 
@@ -36,11 +38,14 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
 
     XYSeriesCollection timeSeries;
     XYSeriesCollection fourierSeries;
-    //PacketListener serialListener;
 
     private String serialName = "COM3";
     private SerialPort serialRx;
-    private int messageLength = 16;
+    private int messageLength = 1024;
+    private int maxMeasuredFreq = 50;
+    private int ADCresolution = 8;
+    private double ADCVolt=3.3;
+    private double voltageADCFactor = ADCVolt/pow(2,ADCresolution);
     private byte [] timeDomain;
 
 
@@ -66,11 +71,9 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
         connectButton.setSize(100,30);
         disconnectButton.setSize(100, 30);
 
-        //timeChart = new JFreeChart();
         panel.add(connectButton);
         panel.add(disconnectButton);
         setupChart();
-        //panel.add(timeChart);
 
         frame.add(panel,BorderLayout.CENTER);
         frame.setDefaultCloseOperation((JFrame.EXIT_ON_CLOSE));
@@ -84,7 +87,7 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
     {
         serialRx = SerialPort.getCommPort(serialName);
         //serialListener = new PacketListener();
-        serialRx.setBaudRate(115200);
+        serialRx.setBaudRate(128000);
         serialRx.setNumDataBits(8);
         serialRx.setNumStopBits(1);
         serialRx.setParity(0);
@@ -94,7 +97,7 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
         timeSeries = new XYSeriesCollection();
         fourierSeries = new XYSeriesCollection();
 
-        timeChart = ChartFactory.createXYLineChart("Time Domain","Miliseconds","Value",timeSeries, PlotOrientation.VERTICAL,false,false,false);
+        timeChart = ChartFactory.createXYLineChart("Time Domain","Miliseconds","Voltage",timeSeries, PlotOrientation.VERTICAL,false,false,false);
         fourierChart = ChartFactory.createXYLineChart("Frequency Domain","Hertz","Value",fourierSeries, PlotOrientation.VERTICAL,false,false,false);
 
         timeChartPanel = new ChartPanel(timeChart);
@@ -156,7 +159,7 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
     private void refreshTimeDataSeries(byte [] data) {
         XYSeries time = new XYSeries("time",false,true);
         for (int i = 0; i<data.length;++i) {
-            time.add(i,data[i]/255.0);
+            time.add(i,((double)data[i])*voltageADCFactor);
         }
 
         timeSeries.removeAllSeries();
@@ -168,15 +171,15 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
         scala.collection.immutable.Seq<Object> transformed;
         for (int i = 0;i<data.length;++i)
         {
-            cmplxData[i] = new Complex(data[i],0.0);
+            cmplxData[i] = new Complex( data[i]/(double)messageLength,0.0);
         }
         Seq<Complex> dataToFFt = scala.collection.JavaConverters.asScalaBuffer(Arrays.asList(cmplxData)).toSeq();
         FourierTrans FourierTrans = new FourierTrans();
         transformed = FourierTrans.absfft((scala.collection.immutable.Seq<Complex>) dataToFFt);
         XYSeries fourier = new XYSeries("fourier",false,true);
         fftResult = scala.collection.JavaConverters.asJava(transformed).stream().mapToDouble(i -> (double) i).toArray();
-        for (int i = data.length-1; i>=0;--i) {
-            fourier.add(i, fftResult[i]);
+        for (int i = 1; i<maxMeasuredFreq;++i) {
+            fourier.add(i, fftResult[i]*voltageADCFactor/(double)messageLength);
         }
         fourierSeries.removeAllSeries();
         fourierSeries.addSeries(fourier);
@@ -197,7 +200,7 @@ public class mainWindow implements ActionListener, SerialPortPacketListener
         else {
             refreshTimeDataSeries(newData);
             calculateFourierDataSeries(newData);
-            System.out.println("GOT IT!");
+            //System.out.println("GOT IT!");
         }
     }
 
